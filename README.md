@@ -491,6 +491,30 @@ This dataset is designed for:
 
 ---
 
+## Model Evaluation
+
+### Cross-Model Benchmarking via Bits-Per-Byte (`bpb_eval.py`)
+
+Once the corpus and cleaned evaluation set are built, the pipeline evaluates open-weight LLMs (Qwen2.5-7B, Salamandra-2B, Llama 3) on a held-out Dominican Spanish evaluation file using `llama.cpp`'s `llama-perplexity` binary against quantized GGUF checkpoints.
+
+**Why bits-per-byte instead of raw perplexity?** Perplexity is computed per-token, but different models use different tokenizers with different vocabulary sizes and segmentation behavior — so raw perplexity scores are not directly comparable across models. Bits-per-byte normalizes the model's negative log-likelihood by the UTF-8 byte length of the text instead of by token count, making it the standard cross-tokenizer comparison metric (Gao et al., 2020; Biderman et al., 2024):
+
+`llama-perplexity` reports perplexity natively but not BPB directly; `bpb_eval.py` derives it from the reported PPL alongside the token and byte counts parsed from the tool's own output, cross-checking against the token/context reporting it already provides.
+
+**Why llama.cpp rather than a PyTorch/transformers-based harness?** EleutherAI's `lm-evaluation-harness` provides a native `bits_per_byte` metric (Biderman et al., 2024), but requires a full PyTorch stack. Running quantized GGUF models through `llama.cpp` instead allows evaluation on modest hardware (including CPU-only) without loading full-precision weights, at the cost of a small, quantified discrepancy: up to `n_ctx - 1` trailing tokens per file go unscored, affecting all models equally and negligible for eval files of this size.
+
+### Tokenizer Fertility
+
+Alongside BPB, the script computes **tokenizer fertility** — tokens produced per word — for each model on the same evaluation text. Fertility measures how many subword tokens a model's tokenizer needs to represent Dominican Spanish text, independent of the model's actual language modeling quality.
+
+**Key finding:** tokenizer fertility reverses the ranking that raw perplexity alone would suggest. A model with a tokenizer poorly suited to Dominican Spanish (e.g. one under-trained on Caribbean Spanish orthography, code-switching, or regional vocabulary) fragments text into more tokens per word. This inflates apparent perplexity even when the model's underlying language understanding is comparable — because perplexity is scored per-token, and more tokens per word means each token carries less information, mechanically lowering per-token confidence regardless of model quality. BPB corrects for this by normalizing to bytes rather than tokens, exposing which apparent perplexity advantages are genuine and which are tokenizer artifacts.
+
+This distinction matters directly for low-resource dialect evaluation: a model can appear to "understand" Dominican Spanish worse than it actually does, purely because its tokenizer wasn't built with this dialect's text patterns in mind — a confound that's easy to miss without computing fertility alongside perplexity.
+
+**References (evaluation methodology):**
+- Gao et al. (2020). *The Pile: An 800GB Dataset of Diverse Text for Language Modeling*. [arXiv:2101.00027](https://arxiv.org/abs/2101.00027) — introduces bits-per-byte as a tokenizer-agnostic evaluation metric.
+- Biderman et al. (2024). *Lessons from the Trenches on Reproducible Evaluation of Language Models*. [arXiv:2405.14782](https://arxiv.org/abs/2405.14782) — documents `lm-evaluation-harness`'s native `bits_per_byte` metric and best practices for cross-tokenizer LM evaluation.
+
 ## Full Reference List
 
 | Citation | Description |
